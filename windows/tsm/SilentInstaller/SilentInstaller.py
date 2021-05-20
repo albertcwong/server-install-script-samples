@@ -317,7 +317,7 @@ def run_worker_installer(options, secrets):
     worker_log_file_full_path = worker_log_file.name
     worker_log_file.close()
 
-    worker_installer_args = ' /INSTALL /SILENT ACCEPTEULA=1'
+    worker_installer_args = ' /INSTALL /SILENT ACCEPTEULA=1 EMBEDDEDCREDENTIAL=1'
     worker_installer_args += ' /LOG "' + worker_log_file_full_path + '"'
     worker_installer_args += ' INSTALLDIR="' + options.installDir + '"'
     worker_installer_args += ' DATADIR="' + options.dataDir + '"'
@@ -381,11 +381,12 @@ def getGatewayPort(configFile):
                 print('Warning: gateway.port key specified twice in the configuration template, using value of ' + key)
             result = key
 
-    elif result == None:
+    if result is None:
         result = 80
         print('Warning: No gateway port specified, defaulting to port 80.')
 
-    return result
+    print(f'Gateway port is {result}')
+    return result  
 
 def run_setup(options, secrets, package_version):
     ''' Runs a sequence of tsm commands to perform setup '''
@@ -410,8 +411,17 @@ def run_setup(options, secrets, package_version):
     if options.saveNodeConfiguration == 'yes':
         run_tsm_command(tsm_path, secrets, ['topology', 'nodes', 'get-bootstrap-file', '--file', options.nodeConfigurationDirectory], port)
         print('Node configuration file saved.')
+
     run_tsm_command(tsm_path, secrets, ['settings', 'import', '--config-only', '-f', options.configFile], port)
     print('Configuration settings imported')
+
+    # set config keys
+    if 'configKeys' in options.configFile:
+        config = read_json_file(options.configFile)
+        for key, value in config:
+            run_tsm_command(tsm_path, secrets, ['configuration', 'set', '-k', key, '-v', value], port)
+    print('config keys set')
+
     run_tsm_command(tsm_path, secrets, ['pending-changes', 'apply', '--ignore-prompt', '--ignore-warnings'], port)
     print('Configuration applied')
     run_tsm_command(tsm_path, secrets, ['initialize', '--request-timeout', '7200'], port)

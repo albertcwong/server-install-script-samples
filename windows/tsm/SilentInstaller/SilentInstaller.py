@@ -512,14 +512,18 @@ def main():
         secrets = get_secrets(options)
         if options.type == 'updateTopology':
             package_path = os.path.join(options.installDir, "packages")
+            print(package_path)
             lst = os.listdir(package_path)
             lst.sort(reverse=True)
             for subdir in lst:
+                print(subdir)
                 if "bin." in subdir:
                     tsm_path = os.path.join(package_path, subdir, "tsm.cmd")
                     found_tsm = False
+                    print(tsm_path)
+                    print(os.path.isfile(tsm_path))
                     if os.path.isfile(tsm_path):
-                        get_nodes_and_apply_topology(options.configFile, tsm_path, secrets, options.controllerPort, apply_and_restart=True)
+                        get_nodes_and_apply_topology(options.configFile, tsm_path, secrets, options.controllerPort, apply_and_restart=True)                        
                         found_tsm = True
                         break
                     if not found_tsm:

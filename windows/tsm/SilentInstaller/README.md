@@ -19,7 +19,7 @@ This repository includes a sample Python script for performing installation of T
 This is a reference Python script to install Tableau Services Manager.
 
 ### Requirements
-This script targets Python version 3.5 or later. 
+This script targets Python version 3.5 or later and cryptography library
 
 ### Usage examples
 The script has three "modes"; _install_ _workerInstall_ and _updateTopology_; each mode can have several arguments. Since the automated installer is meant to run without user interaction, you must input all parameters into the required arguments that are passed to the script. Alternatively, you can also put the required arguments into the bootstrap file. You can use the file templates provided for each type of files below.

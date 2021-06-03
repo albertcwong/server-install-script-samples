@@ -1,4 +1,5 @@
 from __future__ import print_function
+from crypto import decrypt, load_key
 import sys
 import os
 import argparse
@@ -7,6 +8,7 @@ import tempfile
 import json
 import socket
 import unicodedata
+import tempfile
 
 try:
     import winreg
@@ -32,7 +34,10 @@ class Options(object):
         'start': 'yes',
         'saveNodeConfiguration': 'yes',
         'nodeConfigurationDirectory': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nodeConfiguration.json'),
-        'type': 'install'
+        'type': 'install',
+        'configEncrypted': False,
+        'secretsEncrypted': False,
+        'keyFile': None
     }
 
     updateTopologyRequired = [
@@ -150,6 +155,9 @@ def make_cmd_line_parser():
     optional_flags.add_argument('--start', help='Should Tableau Server start at the end of the installation?', choices=['yes', 'no'], default=Options.defaults['start'])
     optional_flags.add_argument('--saveNodeConfiguration', help='Should Tableau Server save the node configuration file for worker installation?', choices=['yes', 'no'], default=Options.defaults['saveNodeConfiguration'])
     optional_flags.add_argument('--nodeConfigurationDirectory', help='Directory to save the node setup file for worker installation if you choose YES for --saveNodeConfigurationFile option', default=Options.defaults['nodeConfigurationDirectory'])
+    optional_flags.add_argument('--settingsEncrypted', help='Is Topology File Encrypted? True|False', default=Options.defaults['settingsEncrypted'])
+    optional_flags.add_argument('--secretsEncrypted', help='Is Secrets File Encrypted? True|False', default=Options.defaults['secretsEncrypted'])
+    optional_flags.add_argument('--keyFile', help='Encryption Key', default=Options.defaults['keyFile'])
 
     # Required flags (no reasonable defaults)
     required_flags = install_parser.add_argument_group('required flags')
@@ -317,7 +325,7 @@ def run_worker_installer(options, secrets):
     worker_log_file_full_path = worker_log_file.name
     worker_log_file.close()
 
-    worker_installer_args = ' /INSTALL /SILENT ACCEPTEULA=1 EMBEDDEDCREDENTIAL=1'
+    worker_installer_args = ' /SILENT ACCEPTEULA=1 EMBEDDEDCREDENTIAL=1'
     worker_installer_args += ' /LOG "' + worker_log_file_full_path + '"'
     worker_installer_args += ' INSTALLDIR="' + options.installDir + '"'
     worker_installer_args += ' DATADIR="' + options.dataDir + '"'
@@ -412,12 +420,18 @@ def run_setup(options, secrets, package_version):
         run_tsm_command(tsm_path, secrets, ['topology', 'nodes', 'get-bootstrap-file', '--file', options.nodeConfigurationDirectory], port)
         print('Node configuration file saved.')
 
-    run_tsm_command(tsm_path, secrets, ['settings', 'import', '--config-only', '-f', options.configFile], port)
+    configFile = options.configFile 
+    tempFile = tempfile.NamedTemporaryFile(delete=False)    
+    if options.configEncrypted.lower() == 'true':
+        decrypt(load_key(options.keyFile), options.configFile, tempFile.name)
+        configFile = tempFile.name
+
+    run_tsm_command(tsm_path, secrets, ['settings', 'import', '--config-only', '-f', configFile], port)
     print('Configuration settings imported')
 
     # set config keys
-    if 'configKeys' in options.configFile:
-        config = read_json_file(options.configFile)
+    if 'configKeys' in configFile:
+        config = read_json_file(configFile)
         for key, value in config:
             run_tsm_command(tsm_path, secrets, ['configuration', 'set', '-k', key, '-v', value], port)
     print('config keys set')
@@ -426,15 +440,18 @@ def run_setup(options, secrets, package_version):
     print('Configuration applied')
     run_tsm_command(tsm_path, secrets, ['initialize', '--request-timeout', '7200'], port)
     print('Initialization completed')
-    get_nodes_and_apply_topology(options.configFile, tsm_path, secrets, port)
+    get_nodes_and_apply_topology(configFile, tsm_path, secrets, port)
     run_tsm_command(tsm_path, secrets, ['pending-changes', 'apply', '--ignore-prompt', '--ignore-warnings'], port)
     print('Topology applied')
     if options.start == 'yes':
         run_tsm_command(tsm_path, secrets, ['start', '--request-timeout', '1800'], port)
         print('Server is installed and running')
-        run_tabcmd_command(tabcmd_path, ['initialuser', '--server', 'localhost:'+str(getGatewayPort(options.configFile)), '--username', secrets['content_admin_user'], '--password', secrets['content_admin_pass']])
+        run_tabcmd_command(tabcmd_path, ['initialuser', '--server', 'localhost:'+str(getGatewayPort(configFile)), '--username', secrets['content_admin_user'], '--password', secrets['content_admin_pass']])
         print('Initial admin created')
     print('Installation complete')
+
+    if options.configEncrypted.lower() == 'true':
+        tempFile.close()
 
 def get_options():
     ''' Parses the command line arguments and configuration files specified by the user '''
@@ -456,7 +473,16 @@ def get_options():
 def get_secrets(options):
     ''' Retrieves the secrets from the user specified file '''
 
-    return read_json_file(options.secretsFile)
+    secretsFile = options.secretsFile
+    tempFile = tempfile.NamedTemporaryFile(delete=False)    
+    if options.secretsEncrypted.lower() == 'true':
+        decrypt(load_key(options.keyFile), secretsFile, tempFile.name)
+        secretsFile = tempFile.name
+
+    secrets = read_json_file(secretsFile)
+    tempFile.close()
+
+    return secrets
 
 def is_server_installed():
     ''' Checks if there is an existing installation of Tableau Server '''
@@ -477,6 +503,7 @@ def get_nodes_and_apply_topology(config_file, tsm_path, secrets, port, apply_and
     ''' Retrieves the nodes from the config file and apply topology update if all nodes are ready '''
 
     config = read_json_file(config_file)
+
     expected_nodes = set()
     if 'nodes' in config['topologyVersion']:
         # See if nodes are in entities, if yes get them
